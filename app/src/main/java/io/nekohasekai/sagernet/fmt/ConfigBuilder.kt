@@ -670,6 +670,11 @@ fun buildConfig(
             tag = "dns-local"
             detour = TAG_DIRECT
         })
+        dns.servers.add(DNSServerOptions().apply {
+            address = "local"
+            tag = "local"
+            detour = TAG_DIRECT
+        })
 
         directDNS.firstOrNull().let {
             dns.servers.add(DNSServerOptions().apply {
