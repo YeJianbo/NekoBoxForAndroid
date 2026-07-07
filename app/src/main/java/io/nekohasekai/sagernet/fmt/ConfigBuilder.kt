@@ -194,11 +194,14 @@ fun buildConfig(
         }
 
         inbounds = mutableListOf()
+        val localInboundTags = mutableListOf<String>()
+        val localInboundDomainStrategy = genDomainStrategy(DataStore.resolveDestination)
 
         if (!forTest) {
             if (isVPN) inbounds.add(Inbound_TunOptions().apply {
                 type = "tun"
                 tag = "tun-in"
+                localInboundTags.add(tag)
                 stack = when (DataStore.tunImplementation) {
                     TunImplementation.GVISOR -> "gvisor"
                     TunImplementation.SYSTEM -> "system"
@@ -206,9 +209,6 @@ fun buildConfig(
                 }
                 endpoint_independent_nat = true
                 mtu = DataStore.mtu
-                domain_strategy = genDomainStrategy(DataStore.resolveDestination)
-                sniff = needSniff
-                sniff_override_destination = needSniffOverride
                 when (ipv6Mode) {
                     IPv6Mode.DISABLE -> {
                         inet4_address = listOf(VpnService.PRIVATE_VLAN4_CLIENT + "/28")
@@ -227,11 +227,9 @@ fun buildConfig(
             inbounds.add(Inbound_MixedOptions().apply {
                 type = "mixed"
                 tag = TAG_MIXED
+                localInboundTags.add(tag)
                 listen = bind
                 listen_port = DataStore.mixedPort
-                domain_strategy = genDomainStrategy(DataStore.resolveDestination)
-                sniff = needSniff
-                sniff_override_destination = needSniffOverride
             })
         }
 
@@ -242,6 +240,24 @@ fun buildConfig(
             auto_detect_interface = true
             rules = mutableListOf()
             rule_set = mutableListOf()
+        }
+        if (localInboundTags.isNotEmpty()) {
+            if (localInboundDomainStrategy.isNotEmpty()) {
+                route.rules.add(Rule_DefaultOptions().apply {
+                    inbound = localInboundTags
+                    action = "resolve"
+                    _hack_config_map["strategy"] = localInboundDomainStrategy
+                })
+            }
+            if (needSniff) {
+                route.rules.add(Rule_DefaultOptions().apply {
+                    inbound = localInboundTags
+                    action = "sniff"
+                    if (needSniffOverride) {
+                        _hack_config_map["override_destination"] = true
+                    }
+                })
+            }
         }
 
         // returns outbound tag
