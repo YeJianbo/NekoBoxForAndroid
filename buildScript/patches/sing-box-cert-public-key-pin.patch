@@ -1,47 +1,43 @@
 diff --git a/common/tls/std_client.go b/common/tls/std_client.go
-index 0f855228..0cdf9e81 100644
+index 85df7b74..8db45519 100644
 --- a/common/tls/std_client.go
 +++ b/common/tls/std_client.go
-@@ -1,9 +1,12 @@
+@@ -1,8 +1,11 @@
  package tls
  
  import (
 +	"bytes"
- 	"context"
 +	"crypto/sha256"
  	"crypto/tls"
  	"crypto/x509"
 +	"encoding/base64"
  	"net"
+ 	"net/netip"
  	"os"
- 	"strings"
-@@ -100,6 +103,15 @@ func NewSTDClient(ctx context.Context, serverAddress string, options option.Outb
- 			return err
+@@ -126,5 +129,35 @@ func NewSTDClient(router adapter.Router, serverAddress string, options option.Ou
  		}
+ 		tlsConfig.RootCAs = certPool
  	}
 +	if len(options.CertificatePublicKeySHA256) > 0 {
-+		if len(options.Certificate) > 0 || options.CertificatePath != "" {
++		if options.Certificate != "" || options.CertificatePath != "" {
 +			return nil, E.New("certificate_public_key_sha256 is conflict with certificate or certificate_path")
 +		}
 +		tlsConfig.InsecureSkipVerify = true
 +		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-+			return verifyPublicKeySHA256(options.CertificatePublicKeySHA256, rawCerts, tlsConfig.Time)
++			return verifyPublicKeySHA256(options.CertificatePublicKeySHA256, rawCerts)
 +		}
 +	}
- 	if len(options.ALPN) > 0 {
- 		tlsConfig.NextProtos = options.ALPN
- 	}
-@@ -153,3 +165,22 @@ func NewSTDClient(ctx context.Context, serverAddress string, options option.Outb
- 		return stdConfig, nil
- 	}
+ 	return &STDClientConfig{&tlsConfig}, nil
  }
 +
-+func verifyPublicKeySHA256(knownHashValues [][]byte, rawCerts [][]byte, timeFunc func() time.Time) error {
++func verifyPublicKeySHA256(knownHashValues [][]byte, rawCerts [][]byte) error {
++	if len(rawCerts) == 0 {
++		return E.New("missing remote certificate")
++	}
 +	leafCertificate, err := x509.ParseCertificate(rawCerts[0])
 +	if err != nil {
 +		return E.Cause(err, "failed to parse leaf certificate")
 +	}
-+
 +	pubKeyBytes, err := x509.MarshalPKIXPublicKey(leafCertificate.PublicKey)
 +	if err != nil {
 +		return E.Cause(err, "failed to marshal public key")
@@ -55,66 +51,60 @@ index 0f855228..0cdf9e81 100644
 +	return E.New("unrecognized remote public key: ", base64.StdEncoding.EncodeToString(hashValue[:]))
 +}
 diff --git a/common/tls/utls_client.go b/common/tls/utls_client.go
-index fceb15b8..7a1c3db2 100644
+index cedc2712..c8f46ee7 100644
 --- a/common/tls/utls_client.go
 +++ b/common/tls/utls_client.go
-@@ -164,6 +164,15 @@ func NewUTLSClient(ctx context.Context, serverAddress string, options option.Out
+@@ -158,6 +158,15 @@ func NewUTLSClient(router adapter.Router, serverAddress string, options option.O
  		}
- 		tlsConfig.InsecureServerNameToVerify = serverName
+ 		tlsConfig.RootCAs = certPool
  	}
 +	if len(options.CertificatePublicKeySHA256) > 0 {
-+		if len(options.Certificate) > 0 || options.CertificatePath != "" {
++		if options.Certificate != "" || options.CertificatePath != "" {
 +			return nil, E.New("certificate_public_key_sha256 is conflict with certificate or certificate_path")
 +		}
 +		tlsConfig.InsecureSkipVerify = true
 +		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-+			return verifyPublicKeySHA256(options.CertificatePublicKeySHA256, rawCerts, tlsConfig.Time)
++			return verifyPublicKeySHA256(options.CertificatePublicKeySHA256, rawCerts)
 +		}
 +	}
- 	if len(options.ALPN) > 0 {
- 		tlsConfig.NextProtos = options.ALPN
- 	}
+ 	id, err := uTLSClientHelloID(options.UTLS.Fingerprint)
+ 	if err != nil {
+ 		return nil, err
 diff --git a/option/tls.go b/option/tls.go
-index 1c09527c..0385f77a 100644
+index 2ff5f2e4..bed1c560 100644
 --- a/option/tls.go
 +++ b/option/tls.go
-@@ -37,22 +37,23 @@ func (o *InboundTLSOptionsContainer) ReplaceInboundTLSOptions(options *InboundTL
+@@ -17,19 +17,20 @@ type InboundTLSOptions struct {
  }
  
  type OutboundTLSOptions struct {
--	Enabled               bool                       `json:"enabled,omitempty"`
--	DisableSNI            bool                       `json:"disable_sni,omitempty"`
--	ServerName            string                     `json:"server_name,omitempty"`
--	Insecure              bool                       `json:"insecure,omitempty"`
--	ALPN                  badoption.Listable[string] `json:"alpn,omitempty"`
--	MinVersion            string                     `json:"min_version,omitempty"`
--	MaxVersion            string                     `json:"max_version,omitempty"`
--	CipherSuites          badoption.Listable[string] `json:"cipher_suites,omitempty"`
--	Certificate           badoption.Listable[string] `json:"certificate,omitempty"`
--	CertificatePath       string                     `json:"certificate_path,omitempty"`
--	Fragment              bool                       `json:"fragment,omitempty"`
--	FragmentFallbackDelay badoption.Duration         `json:"fragment_fallback_delay,omitempty"`
--	RecordFragment        bool                       `json:"record_fragment,omitempty"`
--	ECH                   *OutboundECHOptions        `json:"ech,omitempty"`
--	UTLS                  *OutboundUTLSOptions       `json:"utls,omitempty"`
--	Reality               *OutboundRealityOptions    `json:"reality,omitempty"`
-+	Enabled                    bool                       `json:"enabled,omitempty"`
-+	DisableSNI                 bool                       `json:"disable_sni,omitempty"`
-+	ServerName                 string                     `json:"server_name,omitempty"`
-+	Insecure                   bool                       `json:"insecure,omitempty"`
-+	ALPN                       badoption.Listable[string] `json:"alpn,omitempty"`
-+	MinVersion                 string                     `json:"min_version,omitempty"`
-+	MaxVersion                 string                     `json:"max_version,omitempty"`
-+	CipherSuites               badoption.Listable[string] `json:"cipher_suites,omitempty"`
-+	Certificate                badoption.Listable[string] `json:"certificate,omitempty"`
-+	CertificatePath            string                     `json:"certificate_path,omitempty"`
-+	CertificatePublicKeySHA256 badoption.Listable[[]byte] `json:"certificate_public_key_sha256,omitempty"`
-+	Fragment                   bool                       `json:"fragment,omitempty"`
-+	FragmentFallbackDelay      badoption.Duration         `json:"fragment_fallback_delay,omitempty"`
-+	RecordFragment             bool                       `json:"record_fragment,omitempty"`
-+	ECH                        *OutboundECHOptions        `json:"ech,omitempty"`
-+	UTLS                       *OutboundUTLSOptions       `json:"utls,omitempty"`
-+	Reality                    *OutboundRealityOptions    `json:"reality,omitempty"`
+-	Enabled         bool                    `json:"enabled,omitempty"`
+-	DisableSNI      bool                    `json:"disable_sni,omitempty"`
+-	ServerName      string                  `json:"server_name,omitempty"`
+-	Insecure        bool                    `json:"insecure,omitempty"`
+-	ALPN            Listable[string]        `json:"alpn,omitempty"`
+-	MinVersion      string                  `json:"min_version,omitempty"`
+-	MaxVersion      string                  `json:"max_version,omitempty"`
+-	CipherSuites    Listable[string]        `json:"cipher_suites,omitempty"`
+-	Certificate     string                  `json:"certificate,omitempty"`
+-	CertificatePath string                  `json:"certificate_path,omitempty"`
+-	ECH             *OutboundECHOptions     `json:"ech,omitempty"`
+-	UTLS            *OutboundUTLSOptions    `json:"utls,omitempty"`
+-	Reality         *OutboundRealityOptions `json:"reality,omitempty"`
++	Enabled                    bool                    `json:"enabled,omitempty"`
++	DisableSNI                 bool                    `json:"disable_sni,omitempty"`
++	ServerName                 string                  `json:"server_name,omitempty"`
++	Insecure                   bool                    `json:"insecure,omitempty"`
++	ALPN                       Listable[string]        `json:"alpn,omitempty"`
++	MinVersion                 string                  `json:"min_version,omitempty"`
++	MaxVersion                 string                  `json:"max_version,omitempty"`
++	CipherSuites               Listable[string]        `json:"cipher_suites,omitempty"`
++	Certificate                string                  `json:"certificate,omitempty"`
++	CertificatePath            string                  `json:"certificate_path,omitempty"`
++	CertificatePublicKeySHA256 Listable[[]byte]        `json:"certificate_public_key_sha256,omitempty"`
++	ECH                        *OutboundECHOptions     `json:"ech,omitempty"`
++	UTLS                       *OutboundUTLSOptions    `json:"utls,omitempty"`
++	Reality                    *OutboundRealityOptions `json:"reality,omitempty"`
  }
  
- type OutboundTLSOptionsContainer struct {
+ type InboundRealityOptions struct {
