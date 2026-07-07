@@ -13,6 +13,8 @@ if [ ! -d "sing-box" ]; then
 fi
 pushd sing-box
 git checkout "$COMMIT_SING_BOX"
+git reset --hard "$COMMIT_SING_BOX"
+git apply "$SRC_ROOT/buildScript/patches/sing-box-cert-public-key-pin.patch"
 popd
 
 ####
@@ -22,6 +24,7 @@ if [ ! -d "libneko" ]; then
 fi
 pushd libneko
 git checkout "$COMMIT_LIBNEKO"
+git reset --hard "$COMMIT_LIBNEKO"
 popd
 
 ####
