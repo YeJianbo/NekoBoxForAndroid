@@ -66,7 +66,9 @@ object RawUpdater : GroupUpdater() {
                 if (DataStore.allowInsecureOnRequest) {
                     allowInsecure()
                 }
-                setURL(subscription.link)
+                setURL(subscription.link
+                    .replace("flag=nekobox", "flag=nekobox-buncloud-pin", ignoreCase = true)
+                    .replace("flag=nb4a", "flag=nb4a-buncloud-pin", ignoreCase = true))
                 setUserAgent(subscription.customUserAgent.takeIf { it.isNotBlank() } ?: USER_AGENT)
             }.execute()
             proxies = parseRaw(Util.getStringBox(response.contentString))
